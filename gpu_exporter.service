@@ -1,0 +1,13 @@
+[Unit]
+Description=GPU User Exporter Service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/gpu_exporter/gpu_exporter.py --interval 10
+Restart=always
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target
