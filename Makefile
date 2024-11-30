@@ -20,9 +20,9 @@ install:
 	sudo cp $(SCRIPT) $(INSTALL_DIR)/
 	sudo chmod +x $(INSTALL_DIR)/$(SCRIPT)
 	# Create virtual environment and install dependencies
-	$(PYTHON) -m venv $(INSTALL_DIR)/venv
-	$(INSTALL_DIR)/venv/bin/pip install --upgrade pip
-	$(INSTALL_DIR)/venv/bin/pip install -r requirements.txt
+	sudo $(PYTHON) -m venv $(INSTALL_DIR)/venv
+	sudo $(INSTALL_DIR)/venv/bin/pip install --upgrade pip
+	sudo $(INSTALL_DIR)/venv/bin/pip install -r requirements.txt
 
 	# Copy the service file from the current directory
 	@echo "Installing systemd service file..."
