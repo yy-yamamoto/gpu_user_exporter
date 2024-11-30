@@ -19,13 +19,17 @@ install:
 	# Copy the script to the installation directory
 	sudo cp $(SCRIPT) $(INSTALL_DIR)/
 	sudo chmod +x $(INSTALL_DIR)/$(SCRIPT)
-	# Install Python dependencies
-	sudo $(PYTHON) -m pip install --upgrade pip
-	sudo $(PYTHON) -m pip install -r requirements.txt
+	# Create virtual environment and install dependencies
+	$(PYTHON) -m venv $(INSTALL_DIR)/venv
+	$(INSTALL_DIR)/venv/bin/pip install --upgrade pip
+	$(INSTALL_DIR)/venv/bin/pip install -r requirements.txt
 
 	# Copy the service file from the current directory
 	@echo "Installing systemd service file..."
 	sudo cp $(LOCAL_SERVICE_FILE) $(SERVICE_FILE)
+	# Adjust systemd service file to use virtual environment
+	sudo sed -i 's|ExecStart=.*|ExecStart=$(INSTALL_DIR)/venv/bin/python $(INSTALL_DIR)/$(SCRIPT)|' $(SERVICE_FILE)
+
 
 	# Reload systemd and enable the service
 	@echo "Enabling GPU Exporter service..."
