@@ -1,6 +1,9 @@
 # GPU User Exporter
 
-GPU Exporter is a Python-based tool that collects GPU usage data, including memory usage, utilization rates, and process-level metrics, and exposes them to Prometheus. It helps you monitor GPU performance and visualize it using tools like Grafana.
+GPU User Exporter is a tool designed to monitor and export GPU usage metrics for users. This tool helps in tracking GPU utilization and provides insights for optimizing resource allocation.
+
+This is a Python-based tool that collects GPU usage data, including memory usage, utilization rates, and process-level metrics, and exposes them to Prometheus. It helps you monitor GPU performance and visualize it using tools like Grafana.
+
 
 ## Features
 
