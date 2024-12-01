@@ -18,6 +18,9 @@ gpu_utilization_gauge = Gauge(
 gpu_user_memory_usage_gauge = Gauge(
     "gpu_user_memory_usage", "User Memory Usage (MiB)", ["gpu_index", "user"]
 )
+gpu_user_utilization_gauge = Gauge(
+    "gpu_user_utilization", "User GPU Utilization (%)", ["gpu_index", "user"]
+)
 
 
 def nvidia_smi(query, columns):
@@ -44,12 +47,15 @@ def getent_password():
     return users
 
 
-def collect_gpu_data(previous_user_memory_usage):
+def collect_gpu_data(previous_user_stats):
     """Collect GPU usage data."""
     users = getent_password()
     user_memory_usage = defaultdict(
         lambda: defaultdict(int)
     )  # {gpu_index: {user: memory}}
+    user_utilization = defaultdict(
+        lambda: defaultdict(float)
+    )  # {gpu_index: {user: utilization}}
     gpu_data = {}
 
     # Collect GPU utilization and memory information
@@ -83,10 +89,28 @@ def collect_gpu_data(previous_user_memory_usage):
                 user_memory_usage[gpu_index][user] += app["used_memory"]
                 active_users.add((gpu_index, user))
 
-    # Reset memory usage for inactive users
-    for (gpu_index, user), last_memory in previous_user_memory_usage.items():
+    # Calculate user utilization
+    for gpu in gpus:
+        gpu_index = int(gpu["index"])
+        total_gpu_memory = int(gpu["memory.total"])
+        gpu_utilization = int(gpu["utilization.gpu"])
+
+        total_memory_used = sum(user_memory_usage[gpu_index].values())
+        if total_gpu_memory > 0 and total_memory_used > 0:
+            for user, memory_used in user_memory_usage[gpu_index].items():
+                # Calculate the user's share of GPU utilization
+                user_utilization[gpu_index][user] = (
+                    memory_used / total_memory_used
+                ) * gpu_utilization
+        else:
+            for user in user_memory_usage[gpu_index].keys():
+                user_utilization[gpu_index][user] = 0.0
+
+    # Reset usage for inactive users
+    for (gpu_index, user), stats in previous_user_stats.items():
         if (gpu_index, user) not in active_users:
             user_memory_usage[gpu_index][user] = 0
+            user_utilization[gpu_index][user] = 0.0
 
     # Prepare GPU data for Prometheus metrics
     for gpu in gpus:
@@ -102,12 +126,14 @@ def collect_gpu_data(previous_user_memory_usage):
             "total_memory": gpu["memory.total"],
         }
 
-    return gpu_data, user_memory_usage
+    return gpu_data, user_memory_usage, user_utilization
 
 
-def update_metrics(previous_user_memory_usage):
+def update_metrics(previous_user_stats):
     """Update Prometheus metrics."""
-    gpu_data, user_memory_usage = collect_gpu_data(previous_user_memory_usage)
+    gpu_data, user_memory_usage, user_utilization = collect_gpu_data(
+        previous_user_stats
+    )
 
     # Update GPU utilization and memory usage metrics
     for gpu_index, gpu in gpu_data.items():
@@ -126,9 +152,19 @@ def update_metrics(previous_user_memory_usage):
                 memory_used
             )
 
-    # Return the current user memory usage for the next iteration
+    # Update user utilization metrics
+    for gpu_index, user_data in user_utilization.items():
+        for user, utilization in user_data.items():
+            gpu_user_utilization_gauge.labels(gpu_index=gpu_index, user=user).set(
+                utilization
+            )
+
+    # Return the current user memory and utilization stats for the next iteration
     return {
-        (gpu_index, user): memory_used
+        (gpu_index, user): {
+            "memory": memory_used,
+            "utilization": user_utilization[gpu_index][user],
+        }
         for gpu_index, user_data in user_memory_usage.items()
         for user, memory_used in user_data.items()
     }
@@ -153,9 +189,9 @@ if __name__ == "__main__":
         f"Exporter is running on port 8000 with a scrape interval of {scrape_interval} seconds."
     )
 
-    # Track previous user memory usage
-    previous_user_memory_usage = {}
+    # Track previous user memory and utilization stats
+    previous_user_stats = {}
 
     while True:
-        previous_user_memory_usage = update_metrics(previous_user_memory_usage)
+        previous_user_stats = update_metrics(previous_user_stats)
         time.sleep(scrape_interval)
