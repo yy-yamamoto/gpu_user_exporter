@@ -80,10 +80,6 @@ The GPU Exporter exposes the following metrics:
     - `gpu_memory_usage`: Memory usage of each GPU in MiB
     - `gpu_utilization`: Utilization rate of each GPU in %
 
-1. **Per-Process Metrics**
-    - `gpu_process_memory_usage`: Memory usage per process in MiB
-    - `gpu_process_utilization`: GPU utilization rate per process in %
-
 1. **Per-User Metrics**
     - `gpu_user_memory_usage`: Memory usage per user in MiB
 
@@ -102,7 +98,7 @@ Below is an example of metrics exposed to Prometheus:
 
     # HELP gpu_process_memory_usage Process Memory Usage (MiB)
     # TYPE gpu_process_memory_usage gauge
-    gpu_process_memory_usage{pid="12345", user="john", gpu_index="0", process_name="python"} 512.0
+    gpu_process_memory_usage{user="john", gpu_index="0"} 512.0
 
 ## Uninstallation
 

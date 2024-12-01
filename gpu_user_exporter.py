@@ -1,5 +1,7 @@
 #!/usr/bin/python3
 
+import argparse
+import os
 import subprocess
 import time
 from collections import defaultdict
@@ -133,13 +135,27 @@ def update_metrics(previous_user_memory_usage):
 
 
 if __name__ == "__main__":
+    # Parse arguments and environment variables
+    parser = argparse.ArgumentParser(description="GPU Exporter for Prometheus")
+    parser.add_argument(
+        "--interval",
+        type=int,
+        default=int(os.getenv("METRIC_SCRAPE_INTERVAL", 5)),
+        help="Metric scrape interval in seconds (default: 5 seconds)",
+    )
+    args = parser.parse_args()
+
+    scrape_interval = args.interval
+
     # Start Prometheus HTTP server
     start_http_server(8000)  # Port 8000
-    print("Exporter is running on port 8000")
+    print(
+        f"Exporter is running on port 8000 with a scrape interval of {scrape_interval} seconds."
+    )
 
     # Track previous user memory usage
     previous_user_memory_usage = {}
 
     while True:
         previous_user_memory_usage = update_metrics(previous_user_memory_usage)
-        time.sleep(5)
+        time.sleep(scrape_interval)
