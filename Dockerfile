@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rm -rf /var/lib/apt/lists/*
 
 # アプリケーションコードと依存ファイルをコピー
-COPY gpu_exporter.py /app/gpu_exporter.py
+COPY gpu_user_exporter.py /app/gpu_user_exporter.py
 COPY requirements.txt /app/requirements.txt
 
 # Python依存パッケージをインストール
@@ -22,4 +22,4 @@ ENV NVIDIA_VISIBLE_DEVICES all
 ENV NVIDIA_DRIVER_CAPABILITIES compute,utility
 
 # コンテナ実行時のデフォルトコマンド
-CMD ["python", "gpu_exporter.py"]
+CMD ["python", "gpu_user_exporter.py"]

@@ -1,11 +1,11 @@
-# Makefile for installing and managing the GPU Exporter
+# Makefile for installing and managing the GPU User Exporter
 
 # Variables
-INSTALL_DIR=/opt/gpu_exporter
-SERVICE_FILE=/etc/systemd/system/gpu_exporter.service
-LOCAL_SERVICE_FILE=gpu_exporter.service
+INSTALL_DIR=/opt/gpu_user_exporter
+SERVICE_FILE=/etc/systemd/system/gpu_user_exporter.service
+LOCAL_SERVICE_FILE=gpu_user_exporter.service
 PYTHON=python3
-SCRIPT=gpu_exporter.py
+SCRIPT=gpu_user_exporter.py
 
 # Commands
 .PHONY: all install clean uninstall enable disable
@@ -13,7 +13,7 @@ SCRIPT=gpu_exporter.py
 all: install
 
 install:
-	@echo "Installing GPU Exporter..."
+	@echo "Installing GPU User Exporter..."
 	# Create installation directory
 	sudo mkdir -p $(INSTALL_DIR)
 	# Copy the script to the installation directory
@@ -32,34 +32,34 @@ install:
 
 
 	# Reload systemd and enable the service
-	@echo "Enabling GPU Exporter service..."
+	@echo "Enabling GPU User Exporter service..."
 	sudo systemctl daemon-reload
-	sudo systemctl enable gpu_exporter.service
-	sudo systemctl start gpu_exporter.service
-	@echo "GPU Exporter installed and running."
+	sudo systemctl enable $(LOCAL_SERVICE_FILE)
+	sudo systemctl start $(LOCAL_SERVICE_FILE)
+	@echo "GPU User Exporter installed and running."
 
 clean:
 	@echo "Cleaning up installation..."
 	# Stop the service if running
-	-sudo systemctl stop gpu_exporter.service
+	-sudo systemctl stop $(LOCAL_SERVICE_FILE)
 	# Remove the installation directory
 	-sudo rm -rf $(INSTALL_DIR)
 	# Remove the systemd service file
 	-sudo rm -f $(SERVICE_FILE)
 	# Reload systemd
 	-sudo systemctl daemon-reload
-	@echo "Cleaned up GPU Exporter installation."
+	@echo "Cleaned up GPU User Exporter installation."
 
 uninstall: clean
 
 enable:
-	@echo "Enabling GPU Exporter service..."
-	sudo systemctl enable gpu_exporter.service
-	sudo systemctl start gpu_exporter.service
-	@echo "GPU Exporter service enabled."
+	@echo "Enabling GPU User Exporter service..."
+	sudo systemctl enable $(LOCAL_SERVICE_FILE)
+	sudo systemctl start $(LOCAL_SERVICE_FILE)
+	@echo "GPU User Exporter service enabled."
 
 disable:
-	@echo "Disabling GPU Exporter service..."
-	sudo systemctl disable gpu_exporter.service
-	sudo systemctl stop gpu_exporter.service
-	@echo "GPU Exporter service disabled."
+	@echo "Disabling GPU User Exporter service..."
+	sudo systemctl disable $(LOCAL_SERVICE_FILE)
+	sudo systemctl stop $(LOCAL_SERVICE_FILE)
+	@echo "GPU User Exporter service disabled."
