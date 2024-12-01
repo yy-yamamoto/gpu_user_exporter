@@ -47,7 +47,7 @@ def getent_password():
     return users
 
 
-def collect_gpu_data(previous_user_stats):
+def collect_gpu_data():
     """Collect GPU usage data."""
     users = getent_password()
     user_memory_usage = defaultdict(
@@ -57,6 +57,7 @@ def collect_gpu_data(previous_user_stats):
         lambda: defaultdict(float)
     )  # {gpu_index: {user: utilization}}
     gpu_data = {}
+    active_users = set()
 
     # Collect GPU utilization and memory information
     gpus = tuple(
@@ -68,8 +69,6 @@ def collect_gpu_data(previous_user_stats):
 
     # Collect process-specific GPU usage data
     apps = nvidia_smi("compute-apps", ("gpu_uuid", "pid", "used_memory"))
-
-    active_users = set()  # Track active users to reset inactive ones
 
     for app in apps:
         app["used_memory"] = int(app["used_memory"])
@@ -93,7 +92,7 @@ def collect_gpu_data(previous_user_stats):
     for gpu in gpus:
         gpu_index = int(gpu["index"])
         total_gpu_memory = int(gpu["memory.total"])
-        gpu_utilization = int(gpu["utilization.gpu"])
+        gpu_utilization_value = int(gpu["utilization.gpu"])
 
         total_memory_used = sum(user_memory_usage[gpu_index].values())
         if total_gpu_memory > 0 and total_memory_used > 0:
@@ -101,16 +100,10 @@ def collect_gpu_data(previous_user_stats):
                 # Calculate the user's share of GPU utilization
                 user_utilization[gpu_index][user] = (
                     memory_used / total_memory_used
-                ) * gpu_utilization
+                ) * gpu_utilization_value
         else:
             for user in user_memory_usage[gpu_index].keys():
                 user_utilization[gpu_index][user] = 0.0
-
-    # Reset usage for inactive users
-    for (gpu_index, user), stats in previous_user_stats.items():
-        if (gpu_index, user) not in active_users:
-            user_memory_usage[gpu_index][user] = 0
-            user_utilization[gpu_index][user] = 0.0
 
     # Prepare GPU data for Prometheus metrics
     for gpu in gpus:
@@ -126,14 +119,19 @@ def collect_gpu_data(previous_user_stats):
             "total_memory": gpu["memory.total"],
         }
 
-    return gpu_data, user_memory_usage, user_utilization
+    return gpu_data, user_memory_usage, user_utilization, active_users
 
 
-def update_metrics(previous_user_stats):
+def update_metrics(previous_user_stats, grace_period):
     """Update Prometheus metrics."""
-    gpu_data, user_memory_usage, user_utilization = collect_gpu_data(
-        previous_user_stats
-    )
+    (
+        gpu_data,
+        user_memory_usage,
+        user_utilization,
+        active_users,
+    ) = collect_gpu_data()
+
+    current_time = time.time()
 
     # Update GPU utilization and memory usage metrics
     for gpu_index, gpu in gpu_data.items():
@@ -145,29 +143,35 @@ def update_metrics(previous_user_stats):
             gpu["utilization"]
         )
 
-    # Update user memory usage metrics
+    # Update per-user metrics and handle inactive users
     for gpu_index, user_data in user_memory_usage.items():
         for user, memory_used in user_data.items():
+            utilization = user_utilization[gpu_index][user]
+
             gpu_user_memory_usage_gauge.labels(gpu_index=gpu_index, user=user).set(
                 memory_used
             )
-
-    # Update user utilization metrics
-    for gpu_index, user_data in user_utilization.items():
-        for user, utilization in user_data.items():
             gpu_user_utilization_gauge.labels(gpu_index=gpu_index, user=user).set(
                 utilization
             )
 
-    # Return the current user memory and utilization stats for the next iteration
-    return {
-        (gpu_index, user): {
-            "memory": memory_used,
-            "utilization": user_utilization[gpu_index][user],
-        }
-        for gpu_index, user_data in user_memory_usage.items()
-        for user, memory_used in user_data.items()
-    }
+            # Update last_seen for active users
+            previous_user_stats[(gpu_index, user)] = {"last_seen": current_time}
+
+    for (gpu_index, user), stats in list(previous_user_stats.items()):
+        if (gpu_index, user) not in active_users:
+            # Set metrics to zero for inactive users
+            gpu_user_memory_usage_gauge.labels(gpu_index=gpu_index, user=user).set(0)
+            gpu_user_utilization_gauge.labels(gpu_index=gpu_index, user=user).set(0.0)
+
+            # Check if metrics should be removed
+            elapsed_time = current_time - stats["last_seen"]
+            if elapsed_time >= grace_period:
+                gpu_user_memory_usage_gauge.remove(gpu_index=gpu_index, user=user)
+                gpu_user_utilization_gauge.remove(gpu_index=gpu_index, user=user)
+                del previous_user_stats[(gpu_index, user)]
+
+    return
 
 
 if __name__ == "__main__":
@@ -179,19 +183,26 @@ if __name__ == "__main__":
         default=int(os.getenv("METRIC_SCRAPE_INTERVAL", 5)),
         help="Metric scrape interval in seconds (default: 5 seconds)",
     )
+    parser.add_argument(
+        "--grace-period",
+        type=int,
+        default=30,
+        help="Time (in seconds) to keep 0 values before removing metrics (default: 30 seconds)",
+    )
     args = parser.parse_args()
 
     scrape_interval = args.interval
+    grace_period = args.grace_period
 
     # Start Prometheus HTTP server
     start_http_server(8000)  # Port 8000
     print(
-        f"Exporter is running on port 8000 with a scrape interval of {scrape_interval} seconds."
+        f"Exporter is running on port 8000 with a scrape interval of {scrape_interval} seconds and a grace period of {grace_period} seconds."
     )
 
     # Track previous user memory and utilization stats
     previous_user_stats = {}
 
     while True:
-        previous_user_stats = update_metrics(previous_user_stats)
+        update_metrics(previous_user_stats, grace_period)
         time.sleep(scrape_interval)

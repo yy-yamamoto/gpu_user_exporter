@@ -6,6 +6,8 @@ SERVICE_FILE=/etc/systemd/system/gpu_user_exporter.service
 LOCAL_SERVICE_FILE=gpu_user_exporter.service
 PYTHON=python3
 SCRIPT=gpu_user_exporter.py
+DEFAULT_INTERVAL=10
+DEFAULT_GRACE_PERIOD=60
 
 # Commands
 .PHONY: all install clean uninstall enable disable
@@ -28,8 +30,7 @@ install:
 	@echo "Installing systemd service file..."
 	sudo cp $(LOCAL_SERVICE_FILE) $(SERVICE_FILE)
 	# Adjust systemd service file to use virtual environment
-	sudo sed -i 's|ExecStart=.*|ExecStart=$(INSTALL_DIR)/venv/bin/python $(INSTALL_DIR)/$(SCRIPT)|' $(SERVICE_FILE)
-
+	sudo sed -i 's|ExecStart=.*|ExecStart=$(INSTALL_DIR)/venv/bin/python $(INSTALL_DIR)/$(SCRIPT) --interval $(DEFAULT_INTERVAL) --grace-period $(DEFAULT_GRACE_PERIOD)|' $(SERVICE_FILE)
 
 	# Reload systemd and enable the service
 	@echo "Enabling GPU User Exporter service..."
