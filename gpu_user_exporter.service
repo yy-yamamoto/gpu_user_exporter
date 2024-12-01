@@ -4,7 +4,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /opt/gpu_exporter/gpu_exporter.py --interval 10
+ExecStart=/usr/bin/python3 /opt/gpu_user_exporter/gpu_user_exporter.py --interval 10
 Restart=always
 User=root
 Group=root
