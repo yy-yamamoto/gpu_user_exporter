@@ -19,6 +19,7 @@ This is a Python-based tool that collects GPU usage data, including memory usage
 - **NVIDIA Driver**: Environment with `nvidia-smi` available
 - **Prometheus**: For data collection
 - **pip**: For installing Python dependencies
+- **venv**: For creating a virtual environment
 
 ## Installation
 
