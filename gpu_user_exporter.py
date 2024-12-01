@@ -1,7 +1,5 @@
 #!/usr/bin/python3
 
-import argparse
-import os
 import subprocess
 import time
 from collections import defaultdict
@@ -12,21 +10,11 @@ from prometheus_client import Gauge, start_http_server
 gpu_memory_usage_gauge = Gauge(
     "gpu_memory_usage", "GPU Memory Usage (MiB)", ["gpu_index", "gpu_uuid"]
 )
-gpu_user_memory_usage_gauge = Gauge(
-    "gpu_user_memory_usage", "User Memory Usage (MiB)", ["user", "gpu_index"]
-)
-gpu_process_memory_usage_gauge = Gauge(
-    "gpu_process_memory_usage",
-    "Process Memory Usage (MiB)",
-    ["pid", "user", "gpu_index", "process_name"],
-)
 gpu_utilization_gauge = Gauge(
     "gpu_utilization", "GPU Utilization (%)", ["gpu_index", "gpu_uuid"]
 )
-gpu_process_utilization_gauge = Gauge(
-    "gpu_process_utilization",
-    "Process GPU Utilization (%)",
-    ["pid", "user", "gpu_index", "process_name"],
+gpu_user_memory_usage_gauge = Gauge(
+    "gpu_user_memory_usage", "User Memory Usage (MiB)", ["gpu_index", "user"]
 )
 
 
@@ -54,12 +42,13 @@ def getent_password():
     return users
 
 
-def collect_gpu_data():
+def collect_gpu_data(previous_user_memory_usage):
     """Collect GPU usage data."""
     users = getent_password()
-    processes = dict()
-    apps_by_gpu = defaultdict(list)
-    memory_usage = defaultdict(int)
+    user_memory_usage = defaultdict(
+        lambda: defaultdict(int)
+    )  # {gpu_index: {user: memory}}
+    gpu_data = {}
 
     # Collect GPU utilization and memory information
     gpus = tuple(
@@ -70,88 +59,87 @@ def collect_gpu_data():
     )
 
     # Collect process-specific GPU usage data
-    apps = nvidia_smi("compute-apps", ("gpu_uuid", "pid", "name", "used_memory"))
+    apps = nvidia_smi("compute-apps", ("gpu_uuid", "pid", "used_memory"))
+
+    active_users = set()  # Track active users to reset inactive ones
+
     for app in apps:
-        app["pid"] = int(app["pid"])
-        if app["pid"] not in processes:
-            try:
-                with open("/proc/{:d}/loginuid".format(app["pid"])) as f:
-                    processes[app["pid"]] = {"uid": int(next(f).strip())}
-            except FileNotFoundError:
-                processes[app["pid"]] = dict()
         app["used_memory"] = int(app["used_memory"])
-        apps_by_gpu[app["gpu_uuid"]].append(app)
-        if "uid" in processes[app["pid"]]:
-            memory_usage[processes[app["pid"]]["uid"]] += app["used_memory"]
+        gpu_uuid = app["gpu_uuid"]
 
-    return gpus, apps_by_gpu, memory_usage, processes, users
+        try:
+            with open(f"/proc/{app['pid']}/loginuid") as f:
+                uid = int(f.read().strip())
+                user = users.get(uid, "[Unknown]")
+        except FileNotFoundError:
+            user = "[Unknown]"
 
+        # Aggregate memory usage by user and GPU
+        for gpu in gpus:
+            if gpu["gpu_uuid"] == gpu_uuid:
+                gpu_index = int(gpu["index"])
+                user_memory_usage[gpu_index][user] += app["used_memory"]
+                active_users.add((gpu_index, user))
 
-def update_metrics():
-    """Update Prometheus metrics."""
-    gpus, apps_by_gpu, memory_usage, processes, users = collect_gpu_data()
+    # Reset memory usage for inactive users
+    for (gpu_index, user), last_memory in previous_user_memory_usage.items():
+        if (gpu_index, user) not in active_users:
+            user_memory_usage[gpu_index][user] = 0
 
-    # Update GPU utilization and memory usage metrics
+    # Prepare GPU data for Prometheus metrics
     for gpu in gpus:
         gpu["index"] = int(gpu["index"])
         gpu["memory.used"] = int(gpu["memory.used"])
         gpu["memory.total"] = int(gpu["memory.total"])
         gpu["utilization.gpu"] = int(gpu["utilization.gpu"])
 
+        gpu_data[gpu["index"]] = {
+            "gpu_uuid": gpu["gpu_uuid"],
+            "memory_used": gpu["memory.used"],
+            "utilization": gpu["utilization.gpu"],
+            "total_memory": gpu["memory.total"],
+        }
+
+    return gpu_data, user_memory_usage
+
+
+def update_metrics(previous_user_memory_usage):
+    """Update Prometheus metrics."""
+    gpu_data, user_memory_usage = collect_gpu_data(previous_user_memory_usage)
+
+    # Update GPU utilization and memory usage metrics
+    for gpu_index, gpu in gpu_data.items():
         gpu_memory_usage_gauge.labels(
-            gpu_index=gpu["index"], gpu_uuid=gpu["gpu_uuid"]
-        ).set(gpu["memory.used"])
+            gpu_index=gpu_index, gpu_uuid=gpu["gpu_uuid"]
+        ).set(gpu["memory_used"])
 
-        gpu_utilization_gauge.labels(
-            gpu_index=gpu["index"], gpu_uuid=gpu["gpu_uuid"]
-        ).set(gpu["utilization.gpu"])
+        gpu_utilization_gauge.labels(gpu_index=gpu_index, gpu_uuid=gpu["gpu_uuid"]).set(
+            gpu["utilization"]
+        )
 
-        # Calculate per-process GPU utilization
-        total_gpu_memory = gpu["memory.total"]
-        for app in apps_by_gpu[gpu["gpu_uuid"]]:
-            if "uid" in processes[app["pid"]]:
-                user = users.get(processes[app["pid"]]["uid"], "[Unknown]")
-            else:
-                user = "[Not Found]"
+    # Update user memory usage metrics
+    for gpu_index, user_data in user_memory_usage.items():
+        for user, memory_used in user_data.items():
+            gpu_user_memory_usage_gauge.labels(gpu_index=gpu_index, user=user).set(
+                memory_used
+            )
 
-            gpu_process_memory_usage_gauge.labels(
-                pid=app["pid"],
-                user=user,
-                gpu_index=gpu["index"],
-                process_name=app["name"],
-            ).set(app["used_memory"])
-
-            # Estimate process GPU utilization
-            if total_gpu_memory > 0:
-                estimated_utilization = (app["used_memory"] / total_gpu_memory) * gpu[
-                    "utilization.gpu"
-                ]
-                gpu_process_utilization_gauge.labels(
-                    pid=app["pid"],
-                    user=user,
-                    gpu_index=gpu["index"],
-                    process_name=app["name"],
-                ).set(estimated_utilization)
+    # Return the current user memory usage for the next iteration
+    return {
+        (gpu_index, user): memory_used
+        for gpu_index, user_data in user_memory_usage.items()
+        for user, memory_used in user_data.items()
+    }
 
 
 if __name__ == "__main__":
-    # Parse arguments and environment variables
-    parser = argparse.ArgumentParser(description="GPU Exporter for Prometheus")
-    parser.add_argument(
-        "--interval",
-        type=int,
-        default=int(os.getenv("METRIC_SCRAPE_INTERVAL", 10)),
-        help="Metric scrape interval in seconds (default: 10 seconds)",
-    )
-    args = parser.parse_args()
-
-    scrape_interval = args.interval
-
     # Start Prometheus HTTP server
     start_http_server(8000)  # Port 8000
-    print(
-        f"Exporter is running on port 8000 with a scrape interval of {scrape_interval} seconds."
-    )
+    print("Exporter is running on port 8000")
+
+    # Track previous user memory usage
+    previous_user_memory_usage = {}
+
     while True:
-        update_metrics()
-        time.sleep(scrape_interval)
+        previous_user_memory_usage = update_metrics(previous_user_memory_usage)
+        time.sleep(5)
